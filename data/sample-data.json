@@ -1,0 +1,17 @@
+{
+  "faqs": [
+    {"question": "营业时间", "answer": "我们每天 9:00-21:00 营业，节假日正常营业。"},
+    {"question": "退换货", "answer": "收到商品后7天内支持无理由退换，请保持商品完好并联系客服。"},
+    {"question": "发货", "answer": "下单后48小时内发货，默认顺丰快递，偏远地区3-5天到达。"},
+    {"question": "包邮", "answer": "满99元包邮，不满99元运费10元。"},
+    {"question": "支付", "answer": "支持微信支付、支付宝、货到付款。"},
+    {"question": "发票", "answer": "可以开电子发票，请在下单时备注。"}
+  ],
+  "products": [
+    {"id": 1, "name": "经典白T恤", "stock": 15, "price": 89, "category": "上衣"},
+    {"id": 2, "name": "牛仔裤", "stock": 8, "price": 199, "category": "裤子"},
+    {"id": 3, "name": "帆布鞋", "stock": 0, "price": 159, "category": "鞋子"},
+    {"id": 4, "name": "运动鞋", "stock": 12, "price": 259, "category": "鞋子"},
+    {"id": 5, "name": "连帽卫衣", "stock": 5, "price": 169, "category": "上衣"}
+  ]
+}
