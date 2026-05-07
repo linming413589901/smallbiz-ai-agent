@@ -12,6 +12,8 @@ const model = new ChatOpenAI({
   configuration: {
     baseURL: process.env.OPENAI_BASE_URL || "https://api.xiaomimimo.com/v1",
   },
+  timeout: 30_000, // 30秒超时
+  maxRetries: 2,   // 自动重试2次
 });
 
 // 绑定所有工具
@@ -30,29 +32,73 @@ export interface Message {
   content: string;
 }
 
+// 重试辅助函数
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 2,
+  delayMs = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+      // 如果是认证错误（401/403），不重试
+      if (err?.status === 401 || err?.status === 403) {
+        throw err;
+      }
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, delayMs * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export async function chat(messages: Message[]): Promise<string> {
+  // 输入校验
+  if (!messages || messages.length === 0) {
+    return "你好呀~ 有什么可以帮你的吗？😊";
+  }
+
+  // 截断过长的消息历史（保留最近20条）
+  const recentMessages = messages.slice(-20);
+
   // 转换消息格式
   const lcMessages = [
     new SystemMessage(SYSTEM_PROMPT),
-    ...messages.map((m) =>
-      m.role === "user"
-        ? new HumanMessage(m.content)
-        : new AIMessage(m.content)
-    ),
+    ...recentMessages.map((m) => {
+      // 截断单条过长消息
+      const content = m.content?.slice(0, 2000) || "";
+      return m.role === "user"
+        ? new HumanMessage(content)
+        : new AIMessage(content);
+    }),
   ];
 
-  // 调用模型
-  let response = await modelWithTools.invoke(lcMessages);
+  // 调用模型（带重试）
+  let response = await withRetry(() => modelWithTools.invoke(lcMessages));
 
   // 处理工具调用（支持多轮）
-  let maxRounds = 5; // 防止死循环
+  let maxRounds = 5;
   while (response.tool_calls && response.tool_calls.length > 0 && maxRounds-- > 0) {
     const toolResults: string[] = [];
     for (const toolCall of response.tool_calls) {
       const targetTool = toolMap[toolCall.name];
       if (targetTool) {
-        const result = await targetTool.invoke(toolCall.args);
-        toolResults.push(result);
+        try {
+          const result = await Promise.race([
+            targetTool.invoke(toolCall.args),
+            new Promise<string>((_, reject) =>
+              setTimeout(() => reject(new Error("工具调用超时")), 10_000)
+            ),
+          ]);
+          toolResults.push(result);
+        } catch (err: any) {
+          console.error(`Tool ${toolCall.name} error:`, err.message);
+          toolResults.push(`查询暂时不可用，请稍后再试`);
+        }
       } else {
         toolResults.push(`未知工具: ${toolCall.name}`);
       }
@@ -70,8 +116,14 @@ export async function chat(messages: Message[]): Promise<string> {
       );
     }
 
-    response = await modelWithTools.invoke(lcMessages);
+    response = await withRetry(() => modelWithTools.invoke(lcMessages));
   }
 
-  return response.content as string;
+  // 处理空响应
+  const content = response.content as string;
+  if (!content || content.trim().length === 0) {
+    return "抱歉，我没有理解您的意思，可以换个说法吗？";
+  }
+
+  return content;
 }

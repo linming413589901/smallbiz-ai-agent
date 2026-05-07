@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 interface Message {
   role: "user" | "assistant";
   content: string;
+  error?: boolean;
 }
 
 const QUICK_REPLIES = [
@@ -14,17 +15,19 @@ const QUICK_REPLIES = [
   "发货要几天？",
 ];
 
+const MAX_INPUT_LENGTH = 500;
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content:
-        "你好呀~ 我是小美，有什么可以帮你的吗？😊",
+      content: "你好呀~ 我是小美，有什么可以帮你的吗？😊",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -33,6 +36,13 @@ export default function Home() {
   const sendMessage = async (text?: string) => {
     const content = text || input.trim();
     if (!content || loading) return;
+    if (content.length > MAX_INPUT_LENGTH) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `消息太长了（最多${MAX_INPUT_LENGTH}字），请精简一下~`, error: true },
+      ]);
+      return;
+    }
 
     setInput("");
     const newMessages = [...messages, { role: "user" as const, content }];
@@ -46,21 +56,42 @@ export default function Home() {
         body: JSON.stringify({ messages: newMessages }),
       });
 
-      if (!res.ok) throw new Error("请求失败");
-
       const data = await res.json();
+
+      if (!res.ok) {
+        // 服务器返回了具体错误信息
+        throw new Error(data.error || "请求失败");
+      }
+
+      if (!data.message) {
+        throw new Error("AI 没有返回回复");
+      }
+
       setMessages([...newMessages, { role: "assistant", content: data.message }]);
-    } catch {
+    } catch (err: any) {
+      const errorMsg = err?.message || "服务暂时出了点问题";
       setMessages([
         ...newMessages,
         {
           role: "assistant",
-          content: "抱歉，服务暂时出了点问题，请稍后再试~",
+          content: `${errorMsg}\n\n点击下方可重试 👇`,
+          error: true,
         },
       ]);
     } finally {
       setLoading(false);
+      inputRef.current?.focus();
     }
+  };
+
+  const retryLastMessage = () => {
+    // 找到最后一条用户消息
+    const lastUserIdx = [...messages].reverse().findIndex((m) => m.role === "user");
+    if (lastUserIdx === -1) return;
+    const lastUserMsg = messages[messages.length - 1 - lastUserIdx];
+    // 移除最后的错误消息，重新发送
+    setMessages(messages.slice(0, -1));
+    sendMessage(lastUserMsg.content);
   };
 
   return (
@@ -93,10 +124,17 @@ export default function Home() {
             <div
               style={{
                 ...(msg.role === "user" ? styles.userBubble : styles.botBubble),
+                ...(msg.error ? styles.errorBubble : {}),
                 animation: "fadeIn 0.3s ease",
               }}
             >
               {msg.content}
+              {/* 重试按钮 */}
+              {msg.error && i === messages.length - 1 && (
+                <button onClick={retryLastMessage} style={styles.retryBtn}>
+                  🔄 重新发送
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -133,12 +171,14 @@ export default function Home() {
       {/* Input */}
       <div style={styles.inputArea}>
         <input
+          ref={inputRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+          onChange={(e) => setInput(e.target.value.slice(0, MAX_INPUT_LENGTH))}
+          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
           placeholder="输入你的问题..."
           style={styles.input}
           disabled={loading}
+          maxLength={MAX_INPUT_LENGTH}
         />
         <button
           onClick={() => sendMessage()}
@@ -148,7 +188,7 @@ export default function Home() {
             opacity: loading || !input.trim() ? 0.5 : 1,
           }}
         >
-          发送
+          {loading ? "..." : "发送"}
         </button>
       </div>
 
@@ -262,6 +302,22 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.5,
     whiteSpace: "pre-wrap" as const,
     boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
+  },
+  errorBubble: {
+    background: "#fff3f3",
+    border: "1px solid #ffcdd2",
+    color: "#c62828",
+  },
+  retryBtn: {
+    display: "block",
+    marginTop: 8,
+    padding: "4px 12px",
+    borderRadius: 12,
+    border: "1px solid #c62828",
+    background: "transparent",
+    color: "#c62828",
+    fontSize: 12,
+    cursor: "pointer",
   },
   typingBubble: {
     padding: "12px 20px",
